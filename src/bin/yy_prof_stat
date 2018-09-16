@@ -1,0 +1,1382 @@
+#!/usr/bin/php -dyy_prof.auto_enable=0
+<?php
+
+date_default_timezone_set("Asia/Shanghai");
+
+define("RET_CONTINUE_WAITING", 1);
+define("RET_REFRESH", 2);
+define("RET_REFRESH_LINE_UP", 3);
+define("RET_REFRESH_LINE_DOWN", 4);
+define("RET_BREAK", 5);
+
+error_reporting(E_ALL);
+
+if(!extension_loaded("yy_prof")) {
+    exit(0);
+}
+
+class YY_Prof_Simple_Display {
+    protected static $_width;
+    protected static $_height;
+    public function __construct($interval = 5) {
+        self::$_width = exec("/usr/bin/tput cols");
+        self::$_height = exec("/usr/bin/tput lines");
+    }
+
+    public function width() {
+        return self::$_width;
+    }
+    public function height() {
+        return self::$_height;
+    }
+    public function output($text, $y = 0, $x = 0) {
+        echo $text, "\n";
+    }
+}
+
+class YY_Prof_Display {
+    protected static $_width;
+    protected static $_height;
+
+    protected static $_handler;
+
+    protected static $_counter;
+
+    protected $_win;
+
+    protected $_interval = 1;
+
+    protected $_callbacks = array();
+
+    protected $_highlightlineno = -1;
+
+    public function __construct($interval = 5) {
+        $this->_interval = $interval < 1 ? 5 : $interval;
+        if(self::$_handler == null) {
+            self::$_handler = ncurses_init(); 
+            ncurses_getmaxyx(STDSCR, self::$_height, self::$_width);
+            stream_set_blocking(STDIN, 0);
+            ncurses_curs_set(0);
+            //ncurses_noecho();
+            if (ncurses_has_colors()) {
+                ncurses_start_color();
+                ncurses_assume_default_colors(NCURSES_COLOR_WHITE, NCURSES_COLOR_BLACK);
+                ncurses_init_pair(1, NCURSES_COLOR_YELLOW, NCURSES_COLOR_BLUE);
+            }
+        }
+        $this->_win = ncurses_newwin(self::$_height, self::$_width, 0, 0);
+
+        self::$_counter ++;
+    }
+
+    public function set_interval($interval) {
+        $this->_interval = $interval;
+    }
+
+    public function set_lineno($lineno) {
+        $this->_highlightlineno = $lineno;
+    }
+
+    public function get_lineno() {
+        return $this->_highlightlineno;
+    }
+
+    public function color_on() {
+        if (ncurses_has_colors()) {
+            ncurses_wcolor_set($this->_win, 1);
+        }
+    }
+
+    public function color_off() {
+        if (ncurses_has_colors()) {
+            ncurses_wcolor_set($this->_win, 0);
+        }
+    }
+
+    public function width() {
+        return self::$_width;  
+    }
+    public function height() {
+        return self::$_height;
+    }
+
+    public function register($key, $func) {
+        $this->_callbacks[$key] = $func; 
+    }
+
+    public function clear_callbacks() {
+        $this->_callbacks = array();
+    }
+
+    public function output($text, $y, $x) {
+        $on = $y == $this->_highlightlineno;
+        $on && $this->color_on();
+        ncurses_mvwaddstr($this->_win, $y, $x, $text); 
+        $on && $this->color_off();
+    }
+
+    public function clear() {
+        ncurses_wclear($this->_win);
+        ncurses_wmove($this->_win, 0, 0);
+    }
+
+    public function refresh() {
+        ncurses_wrefresh($this->_win);
+        ncurses_wmove($this->_win, 0, 0);
+    }
+
+    public function sleep() {
+        ncurses_keypad($this->_win, true);
+        $begin = time();
+        $ret = RET_REFRESH;
+        while(true) {
+            $key = $this->getch_nonblock();
+            $this->output($key, 0, 1);
+            $this->refresh();
+            $callback = isset($this->_callbacks[$key]) ? $this->_callbacks[$key] : '';
+            $ret = RET_CONTINUE_WAITING;
+            if($callback) {
+                $ret = $callback($key);
+            } else {
+                if(time() - $begin >= $this->_interval) {
+                    $ret = RET_REFRESH;
+                }
+            }
+            if($ret == RET_CONTINUE_WAITING) {
+                continue;
+            } else {
+                break;
+            }
+        }
+        return $ret;;
+    }
+
+    public function getch_nonblock() {
+        $null = null;    
+        $read = array(STDIN);
+        $ret = stream_select($read, $null, $null, 0, 200000);
+        if($ret != 1) {
+            return null;
+        }
+        return ncurses_wgetch($this->_win);
+    }
+
+    public function __destruct() {
+        if(-- self::$_counter == 0) {
+            ncurses_end();
+        }
+    }
+}
+
+abstract class YY_Prof_Stat {
+    const TYPE_INT = 1;
+    const TYPE_STRING = 2;
+
+    const MODE_DEFAULT = 1;
+    const MODE_FROM_START = 2;
+    const MODE_FROM_INSTALL = 3;
+    /**
+     *
+     * array(
+     *   array("name" => "url", "title" => "URL", "format" => "%7s", "type" => 1)
+     * )
+     *
+     */
+    protected static $_fields;
+    protected static $_showFields;
+    protected static $_showExtraFields;
+
+    protected $_opts;
+
+    protected $_display;
+    protected $_prefix;
+    protected $_interval;
+
+    protected $_list_head;
+    protected $_key_len;
+    protected $_list_format;
+    protected $_list_data_format;
+    protected $_simple_list_head;
+    protected $_simple_list_format;
+    protected $_simple_list_data_format;
+    protected $_boxheight;
+    protected $_list_min_lineno = 2;
+
+    protected $_sort_field;
+    protected $_sort_field_index;
+    protected $_last_sorted_stat;
+    protected $_last_stat;
+    protected $_first_stat;
+
+    protected $_position = -1;
+    protected $_count = 0;
+    protected $_mode = 0;
+
+    protected $_start_time = 0;
+
+    protected $_parent;
+    protected $_delay_callbacks = array();
+
+    protected function __construct($opts, $parent = null) {
+        $this->_opts = $opts;     
+        $this->_prefix = $this->_g("prefix");
+        $this->_is_simple = $this->_g("simple");
+        $interval = $this->_g("interval");
+        $this->_interval = $interval < 1 ? 5 : $interval;
+        $class = $this->_is_simple ? "YY_Prof_Simple_Display" : "YY_Prof_Display";
+        $this->_display = new $class($this->_interval);
+        $this->_parent = $parent;
+        $this->_mode = $this->_g("mode") ?: self::MODE_DEFAULT;
+        $this->_boxheight = $this->_display->height() - $this->_list_min_lineno - 1;
+
+        if(empty(static::$_fields) || empty(static::$_showFields) || empty($this->_sort_field)) {
+            $class = get_called_class();
+            throw new Exception ("$class::\$_fields and $class::\$_showFields cannot be empty"); 
+        }
+        $this->_get_list_head();
+        $this->_start_time = time();
+    }
+
+    public static function get_instance($opts, $parent, $back = false) {
+        static $instance;
+        if($instance == null) {
+            $instance = new static($opts, $parent);
+        }
+        !$back && $instance->resume($opts);
+        return $instance;
+    }
+
+    protected function _g($key) {
+        return isset($this->_opts[$key]) ? $this->_opts[$key] : null;
+    }
+
+    protected function _get_list_head() {
+        $formatList = array();
+        $nameList = array();
+        $dataFormatList = array();
+        foreach(static::$_showFields as $field) {
+            $formatList[] = $field['format'];
+            $dataFormatList[] = $field['data_format'];
+            $nameList[] = $field['title'];
+        }
+        $simpleFormatList = $formatList;
+        $simpleDataFormatList = $dataFormatList;
+        $simpleNameList = $nameList;
+        foreach(static::$_showExtraFields as $field) {
+            $simpleFormatList[] = $field['format'];
+            $simpleDataFormatList[] = $field['data_format'];
+            $simpleNameList[] = $field['title'];
+        }
+
+        $this->_list_format = join(" ", $formatList);
+        $this->_list_data_format = join(" ", $dataFormatList);
+        $this->_simple_list_format = join(" ", $simpleFormatList);
+        $this->_simple_list_data_format = join(" ", $simpleDataFormatList);
+
+        array_unshift($nameList, $this->_list_format);
+        $head =  call_user_func_array("sprintf", $nameList);
+        $width = $this->_display->width();
+        $this->_key_len = $width - strlen($head) - 3;
+        $head = sprintf("%-{$this->_key_len}s %s", "KEY", $head);
+        $this->_list_data_format = "%-{$this->_key_len}s " . $this->_list_data_format;
+        $this->_list_head = $head;
+
+        array_unshift($simpleNameList, $this->_simple_list_format);
+        $head = call_user_func_array("sprintf", $simpleNameList);
+        $this->_simple_list_head = sprintf("%-8s %s", "TIME", $head);
+        $this->_simple_list_data_format = "%-8s " . $this->_simple_list_data_format;
+
+    }
+
+    protected function _print_title($text) {
+        $len = ($this->_display->width() - strlen($text) - 2) / 2;
+        $padding = str_repeat("-", $len > 0 ? $len : 0); 
+        $this->_display->output($padding . $text . $padding, 0, 1); 
+    }
+
+    protected function _print_list_foot() {
+        $page = ($this->_position >= 0 ? intval($this->_position / $this->_boxheight) : 0) + 1;
+        $text = sprintf(" SORTFIELD: %5s MODE: %1d INTERVAL: %3d COUNT: %5d COUNTPERPAGE: %2d POSITION: %5d PAGE: %4d ",
+                $this->_sort_field, $this->_mode, $this->_interval, $this->_count, $this->_boxheight, $this->_position + 1, $page);
+        $len = ($this->_display->width() - strlen($text) - 2) / 2;
+        $padding = str_repeat("-", $len > 0 ? $len : 0);
+        $this->_display->output($padding . $text . $padding, $this->_boxheight + $this->_list_min_lineno, 1);
+    }
+
+    protected function _print_list_head() {
+        $this->_display->output($this->_list_head, 1, 1);
+        $from = $this->_key_len + 2;
+        foreach(static::$_showFields as $key => $val) {
+            if($key <  $this->_sort_field_index) {
+                $from += $val['len'] + 1;
+            } else {
+                break;
+            }
+        }
+        $field = static::$_showFields[$this->_sort_field_index];
+        $this->_display->color_on();
+        $this->_display->output(sprintf($field['format'], $field['title']), 1, $from);
+        $this->_display->color_off();
+    }
+
+    protected function _compute_output_parameters($position) {
+        $lineno =  $position % $this->_boxheight;
+        $from = $position - $lineno;
+        $page = intval($position / $this->_boxheight) + 1;
+        return array($from, $lineno < 0 ? $lineno : $lineno + $this->_list_min_lineno, $page);
+    }
+
+    protected function _print_list($datas) {
+        $height = $this->_display->height() - 1;
+
+        list($from, $lineno, $page) = $this->_compute_output_parameters($this->_position);
+
+        $this->_display->set_lineno($lineno);
+
+        $idx  = $this->_list_min_lineno;
+        $prefixLen = strlen($this->_prefix);
+        for($i = $from; $i < $this->_count; $i++) {
+            $data = $datas[$i]; 
+            if(isset($data['key'])) {
+                $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+            }
+            array_unshift($data, $this->_list_data_format); 
+
+            $text = call_user_func_array("sprintf", $data);
+            $this->_display->output($text, $idx ++, 1);
+            if($idx >= $height) {
+                break;
+            }
+        }
+    }
+    protected function _print_line($ret) {
+        $height = $this->_display->height() - 1;
+        list($from, $lineno, $page) = $this->_compute_output_parameters($this->_position);
+
+        $prefixLen = strlen($this->_prefix);
+        $this->_display->set_lineno($lineno);
+        if(isset($this->_last_sorted_stat[$this->_position])){
+            $data = $this->_last_sorted_stat[$this->_position];
+            if(isset($data['key'])) {
+                $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+            }
+            array_unshift($data, $this->_list_data_format); 
+
+            $text = call_user_func_array("sprintf", $data);
+            $this->_display->output($text, $lineno, 1);
+        }
+        
+        $last_position = $ret == RET_REFRESH_LINE_DOWN ? $this->_position - 1 : $this->_position + 1;
+        if(isset($this->_last_sorted_stat[$last_position])) {
+            list($last_from, $last_lineno, $last_page) = $this->_compute_output_parameters($last_position);
+            if($page == $last_page) {
+                $data = $this->_last_sorted_stat[$last_position];
+                if(isset($data['key'])) {
+                    $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+                }
+                array_unshift($data, $this->_list_data_format); 
+
+                $text = call_user_func_array("sprintf", $data);
+                $this->_display->output($text, $last_lineno, 1);
+            }
+        }
+        $this->_print_list_foot();
+        $this->_display->refresh();
+    }
+
+    protected function _get_display_key($key, $len) {
+        return $key;
+    }
+
+    protected function _get_delta_stat($old, $new) {
+        $fields = array("type" => 1);
+        $delta = array();
+        foreach($new as $key => $val) {
+            if(!isset($old[$key])) {
+                $delta[$key] = $val;
+                continue;
+            }
+            $deltaval = array();
+            $oldval = $old[$key];
+            foreach($val as $k => $v) {
+                if(isset($fields[$k])) {
+                    $deltaval[$k] = $v; 
+                } else {
+                    $deltaval[$k] = $v - $oldval[$k];
+                }
+            }
+            $delta[$key] = $deltaval;
+        }
+        return $delta;
+    }
+
+    protected function _get_delta_stat_ex($old, $new) {
+        $fields = array("type" => 1);
+        $delta = array();
+
+        if(empty($old)) {
+            return $new;
+        }
+        foreach($new as $key => $val) {
+            if(isset($fields[$key])) {
+                $delta[$key] = $val;
+            } else {
+                $delta[$key] = $val - $old[$key];
+            }
+        }
+        return $delta;
+    }
+
+    protected function _sort($datas) {
+        $sortField = $this->_sort_field;
+        usort($datas, function($a, $b) use($sortField) {
+            return $a[$sortField] < $b[$sortField] ? 1 : -1;
+        }); 
+        return $datas;
+    }
+
+    protected function _print_simple_list_head() {
+        $this->_display->output($this->_simple_list_head, 0, 0);
+    }
+
+    public function loop() {
+        while(true) {
+            $stat = $this->get_show_stat($this->_prefix);
+            $this->_last_sorted_stat = $stat = $this->_sort($stat);
+
+            $this->_count = count($stat);
+            $this->_display->clear();
+            $this->print_title();
+            $this->_print_list_head();
+            $this->_print_list($stat);
+            $this->_print_list_foot();
+            $this->_display->refresh();
+CONTINUE_SLEEP:
+            $ret = $this->_display->sleep();
+            switch($ret) {
+                case RET_BREAK:
+                    break 2;
+                case RET_REFRESH_LINE_UP:
+                case RET_REFRESH_LINE_DOWN:
+                    $this->_print_line($ret);
+                    goto CONTINUE_SLEEP;
+                case RET_CONTINUE_WAITING:
+                case RET_REFRESH:
+                    continue ;
+            }
+        }
+
+        $this->check_delay_callbacks();
+        return true;
+    }
+
+    protected function _print_simple_body($stat) {
+        foreach($stat as $data) {
+            array_unshift($data, $this->_simple_list_data_format);
+            $text = call_user_func_array("sprintf", $data);
+            $this->_display->output($text, 0, 0);
+        } 
+    }
+
+    public function loop2() {
+        $i = 0;
+        while(true) {
+            if($i++ % 10 == 0) {
+                $this->_print_simple_title();
+                $this->_print_simple_list_head();
+            }
+            $stat = $this->get_simple_show_stat($this->_prefix);
+            $this->_print_simple_body($stat);
+            sleep($this->_interval);
+        }
+        return true;
+    }
+
+
+    public function register_delay_callback($func) {
+        array_push($this->_delay_callbacks, $func);
+    }
+
+    public function check_delay_callbacks(){
+        while(($callback = array_pop($this->_delay_callbacks))) {
+            $callback();
+        }
+    }
+
+    public function end() {
+        return RET_BREAK;
+    }
+
+    public function pagedown() {
+        if($this->_count < $this->_boxheight) {
+            return ;
+        }
+        $new_position = ($this->_position >= 0 ? 0 : 1) + $this->_position + $this->_boxheight;
+        if($new_position >= $this->_count) {
+            $new_position = $this->_count - 1;
+        }
+        $page = intval((($this->_position + 1) / $this->_boxheight));
+        $new_page = intval(($new_position + 1) / $this->_boxheight);
+        if($page != $new_page) {
+            $this->_position = $new_position;
+            return RET_REFRESH;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function pageup() {
+        if($this->_count < $this->_boxheight) {
+            return ;
+        }
+        $new_position = $this->_position - $this->_boxheight;
+        if($new_position < 0) {
+            $new_position = -1;
+        }
+        $page = intval((($this->_position + 1) / $this->_boxheight));
+        $new_page = intval(($new_position + 1) / $this->_boxheight);
+        if($page != $new_page) {
+            $this->_position = $new_position;
+            return RET_REFRESH;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function up() {
+        if($this->_position > -1) {
+            $old = $this->_position --;
+            if(intval($old / $this->_boxheight) == intval($this->_position / $this->_boxheight)) {
+                return RET_REFRESH_LINE_UP;
+            }
+            return RET_REFRESH;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+    public function down() {
+        if($this->_position < $this->_count && $this->_count > 0) {
+            $old = $this->_position ++;
+            if(intval($old / $this->_boxheight) == intval($this->_position / $this->_boxheight)) {
+                return RET_REFRESH_LINE_DOWN;
+            }
+            return RET_REFRESH;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function set_mode($key) {
+        $mapping = array(
+            1 => self::MODE_DEFAULT,
+            2 => self::MODE_FROM_START,
+            3 => self::MODE_FROM_INSTALL,
+            ord("1") => self::MODE_DEFAULT,
+            ord("2") => self::MODE_FROM_START,
+            ord("3") => self::MODE_FROM_INSTALL,
+        );
+        $this->_mode = $mapping[$key];
+        $this->_print_list_foot();
+        $this->_display->refresh();
+        return RET_REFRESH;
+    }
+
+    public function set_sort_field($key) {
+        if($key == ord("o")) {
+            $this->_sort_field_index ++;
+            if($this->_sort_field_index >= count(static::$_showFields)) {
+                $this->_sort_field_index = 0;
+            }
+        } else if($key == ord("O")) {
+            $this->_sort_field_index --;
+            if($this->_sort_field_index < 0) {
+                $this->_sort_field_index = count(static::$_showFields) - 1;
+            }
+        }
+        $this->_sort_field = static::$_showFields[$this->_sort_field_index]['name'];
+        return RET_REFRESH;
+    }
+
+    public function set_interval($key) {
+        if($key == ord("-")) {
+            $this->_interval --;
+            if($this->_interval < 1) {
+                $this->_interval = 1;
+            }
+        } else if($key == ord("+")) {
+            $this->_interval ++;
+        } else if(is_int($key)) {
+            $this->_interval = $key;
+        }
+        $this->_print_list_foot();
+        $this->_display->set_interval($this->_interval);
+        $this->_display->refresh();
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function register_callbacks() {
+        $this->_display->clear_callbacks();
+        $this->_display->register(ord(" "), array($this, "refresh"));
+        $this->_display->register(ord("q"), array($this, "end"));
+        $this->_display->register(258,      array($this, "down")); // down
+        $this->_display->register(259,      array($this, "up"));   // up
+        $this->_display->register(260,      array($this, "back"));   // left
+        $this->_display->register(261,      array($this, "enter"));   // left
+        $this->_display->register(13,       array($this, "enter")); // enter
+        $this->_display->register(338,       array($this, "pagedown")); // pagedown
+        $this->_display->register(339,       array($this, "pageup")); // pageup
+        $this->_display->register(ord("1"), array($this, "set_mode"));
+        $this->_display->register(ord("2"), array($this, "set_mode"));
+        $this->_display->register(ord("3"), array($this, "set_mode"));
+        $this->_display->register(ord("o"), array($this, "set_sort_field"));
+        $this->_display->register(ord("O"), array($this, "set_sort_field"));
+        $this->_display->register(ord("+"), array($this, "set_interval"));
+        $this->_display->register(ord("-"), array($this, "set_interval"));
+    }
+
+    public function refresh() {
+        return RET_REFRESH;
+    }
+
+    public function back() {
+        if($this->_parent) {
+            $parent = $this->_parent;
+            $this->register_delay_callback(function() use($parent) {
+                $parent->loop();
+            });
+            return RET_BREAK;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    protected function _display_array($arr, &$index) { 
+        if(!is_array($arr)) {
+            $this->_display->output("  " . str_replace(array(" ","\n"), "", var_export($arr, true)), $index ++, 1);
+            return ;
+        }
+        $this->_display->output(" array(", $index ++, 1);
+        foreach($arr as $k => $v) {
+            $this->_display->output("   '$k' => " . str_replace(array("\n", " "), "", var_export($v, true)), $index ++, 1);
+        }
+        $this->_display->output(" )", $index ++, 1);
+    }
+    public function debug() {
+        $display = $this->_display;
+        set_error_handler(function($errno, $errstr, $errfile, $errline, $context) use($display) {
+            $i = 20;
+            $traces = debug_backtrace();
+            $width = $display->width();
+            $display->output("COUNT: {$this->_count}", $i ++, 1);
+            $display->output("ERROR: $errfile:$errline ($errno) $errstr", $i++, 1);
+            $this->_display_array($context['datas'], $i);
+            $idx = 0;
+            foreach($traces as $info) {
+                $func = isset($info['function']) ? $info['function'] : '';
+                $line = isset($info['line']) ? $info['line'] : 0;
+                $file = isset($info['file']) ? $info['file'] : '';
+                $class = isset($info['class']) ? $info['class'] : '';
+                $type = isset($info['type']) ? $info['type'] : '';
+                $args = isset($info['args']) ? $info['args'] : '';
+                $text = " $idx) {$file}:{$line} {$class}{$type}{$func}";
+                $args && $this->_display_array($args, $i);
+                $display->output($text, $i++, 1);
+                $idx ++;
+            }
+        });
+    }
+
+    protected function _print_simple_title() {
+        $this->_print_title("    {$this->_prefix}    "); 
+    }
+
+    abstract public function resume($opts);
+
+    abstract public function enter();
+
+    abstract public function get_stat();
+
+    abstract public function get_show_stat();
+
+    abstract public function print_title();
+
+    abstract public function print_help();
+}
+
+
+class YY_Prof_Stat_Page extends YY_Prof_Stat {
+    protected static $_fields = array(
+        "request_count", "request_time", "url_count", "url_time",
+        "sql_count", "sql_time", "queue_count", "queue_time",
+        "cache_count", "cache_time",
+        "mongodb_count", "mongodb_time",
+        "default_count", "default_time",
+    );
+
+    protected static $_showFields = array(
+        //array("name" => "key", "title" => "KEY", "format" => "%-70s", "data_format" => "%-70s"),
+        array("name" => "qps",   "title" => "QPS",     "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+        array("name" => "rt",    "title" => "RT(ms)",  "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "rt2",   "title" => "RT2(ms)", "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+        array("name" => "url",   "title" => "URL",     "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+        array("name" => "urlrt", "title" => "URLRT",   "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+        array("name" => "sql",   "title" => "SQL",     "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+        array("name" => "sqlrt", "title" => "SQLRT",   "len" => 8,  "format" => "%8s",  "data_format" => "%8.1f"),
+    );
+
+    protected static $_showExtraFields = array(
+        array("name" => "queue",   "title" => "QUEUE",   "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "queuert", "title" => "QUEUERT", "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "cache",   "title" => "CACHE",   "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "cachert", "title" => "CACHERT", "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "mdb",     "title" => "MDB",     "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "mdbrt",   "title" => "MDBRT",   "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "dft",     "title" => "DFT",     "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+        array("name" => "dftrt",   "title" => "DFTRT",   "len" => 8, "format" => "%8s",  "data_format" => "%8.1f"), 
+    );
+
+    protected $_sort_field = 'rt';
+    protected $_sort_field_index = 1;
+
+    protected function _get_display_key($key, $len) {
+        return substr($key, $len);
+    }
+
+    public function get_simple_stat() {
+        $stat = yy_prof_get_page_stat($this->_prefix);
+        return $stat ? array($stat) : array();
+    }
+
+    public function get_simple_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_simple_stat();
+        $run_time = (time() - $this->_start_time) ?: 1;
+        $delta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $interval = $run_time;
+                break;
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['request_count'];
+            $time2 = $val['url_time'] + $val['sql_time'] + $val['queue_time'] 
+                    + $val['cache_time'] + $val['mongodb_time'];
+            $t = array(
+                'key' => date("H:i:s"),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['request_time'] / $count / 1000: 0,
+                'rt2' => $count > 0 ? $time2 / $count / 1000 : 0,
+                'url' => $count > 0 ? $val['url_count'] / $count : 0,
+                'urlrt' => $val['url_count'] > 0 ? $val['url_time'] / $val['url_count'] / 1000 : 0,
+                'sql' => $count > 0 ? $val['sql_count'] / $count : 0,
+                'sqlrt' => $val['sql_count'] > 0 ? $val['sql_time'] / $val['sql_count'] / 1000 : 0,
+                'queue' => $count > 0 ? $val['queue_count'] / $count : 0,
+                'queuert' => $val['queue_count'] > 0 ? $val['queue_time'] / $val['queue_count'] / 1000 : 0,
+                'cache' => $count > 0 ? $val['cache_count'] / $count : 0,
+                'cachert' => $val['cache_count'] > 0 ? $val['cache_time'] / $val['cache_count'] / 1000 : 0,
+                'mdb' => $count > 0 ? $val['mongodb_count'] / $count : 0,
+                'mdbrt' => $val['mongodb_count'] > 0 ? $val['mongodb_time'] / $val['mongodb_count'] / 1000 : 0,
+                'dft' => $count > 0 ? $val['default_count'] / $count : 0,
+                'dftrt' => $val['default_count'] > 0 ? $val['default_time'] / $val['default_count'] / 1000 : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        return $result;
+    }
+
+    public function get_stat() {
+        $ret = yy_prof_get_all_page_stat($this->_prefix);
+        return $ret;
+    }
+
+    public function get_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_stat(); 
+        $run_time = (time() - $this->_start_time) ?: 1;
+        $delta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['request_count'];
+            $time2 = $val['url_time'] + $val['sql_time'] + $val['queue_time'] 
+                    + $val['cache_time'] + $val['mongodb_time'];
+            $t = array(
+                'key' => substr($key, 0, $this->_key_len),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['request_time'] / $count / 1000 : 0,
+                'rt2' => $count > 0 ? $time2 / $count / 1000 : 0,
+                'url' => $count > 0 ? $val['url_count'] / $count : 0,
+                'urlrt' => $val['url_count'] > 0 ? $val['url_time'] / $val['url_count'] / 1000 : 0,
+                'sql' => $count > 0 ? $val['sql_count'] / $count : 0,
+                'sqlrt' => $val['sql_count'] > 0 ? $val['sql_time'] / $val['sql_count'] / 1000 : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        return $result;
+    }
+
+    public function resume($opts) {
+        // do nothing 
+    }
+
+    public function print_help() {
+        // do nothing 
+    }
+
+    public function print_title() {
+        $host = isset($_SERVER['HOSTNAME']) ? $_SERVER['HOSTNAME'] : exec("/bin/hostname");
+        $text = "   <$host> URL/Script STATS --- " . date("Y-m-d H:i:s") . '   ';
+        $this->_print_title($text);
+    }
+
+    public function enter() {
+        if(isset($this->_last_sorted_stat[$this->_position]['key'])) {
+            $opts = $this->_opts;
+            $opts['prefix'] = $this->_last_sorted_stat[$this->_position]['key'];
+            $instance = YY_Prof_Stat_Page_Func::get_instance($opts, $this);
+
+            $this->register_delay_callback(function() use ($instance, $opts) {
+                $instance->run($opts);
+            });
+            return RET_BREAK;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function run() {
+        $this->_first_stat = $this->_last_stat = $this->get_stat();
+
+        $this->register_callbacks();
+
+        $this->loop();
+    }
+
+    public function run2() {
+        $this->_first_stat = $this->_last_stat = $this->get_simple_stat();
+
+        $this->loop2();
+    }
+    public function run3(){
+        $list = yy_prof_get_page_list($this->_prefix); 
+        foreach($list as $row) {
+            echo $row, "\n";
+        }
+    }
+}
+
+class YY_Prof_Stat_Page_Func extends YY_Prof_Stat {
+    protected static $_fields = array(
+        "type", "count", "time",
+    );
+
+    protected static $_showFields = array(
+        //array("name" => "key", "title" => "KEY", "format" => "%-80s", "data_format" => "%-80s"),
+        array("name" => "qps", "title" => "QPS",     "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "rt",  "title" => "RT(ms)",  "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "qpr", "title" => "QPR",     "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "rrt", "title" => "RRT(ms)", "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "pct", "title" => "PCT(%)",  "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+    );
+
+    protected static $_showExtraFields = array();
+
+    protected $_sort_field = 'rt';
+    protected $_sort_field_index = 1;
+
+    protected $_last_page_stat;
+    protected $_first_page_stat;
+    protected $_delta_page_stat;
+
+    public function get_stat() {
+        return yy_prof_get_page_func_stat($this->_prefix);
+    }
+
+    public function get_page_stat() {
+        return yy_prof_get_page_stat($this->_prefix);
+    }
+
+    public function get_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_stat(); 
+        $pageStat = $this->get_page_stat();
+        $run_time = (time() - $this->_start_time) ?: 1;
+
+        $delta = array();
+        $pageDelta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $pageDelta = $this->_get_delta_stat_ex($this->_first_page_stat, $pageStat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $pageDelta = $pageStat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                $pageDelta = $this->_get_delta_stat_ex($this->_last_page_stat, $pageStat);
+                break;
+        }
+        $deltaCount = $pageDelta['request_count'];
+        $deltaTime = $pageDelta['request_time'];
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['count'];
+            $t = array(
+                'key' => substr($key, 0, $this->_key_len),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
+                'qpr' => $deltaCount > 0 ? $count / $deltaCount : 0,
+                'rrt' => $deltaCount > 0 ? $val['time'] / $deltaCount / 1000 : 0,
+                'pct' => $deltaTime > 0 ? 100 * $val['time'] / $deltaTime : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        $this->_last_page_stat = $pageStat;
+        $this->_delta_page_stat = $pageDelta;
+        return $result;
+    }
+
+    public function print_help() {
+    
+    }
+
+    public function print_title() {
+        $stat  = $this->_delta_page_stat;
+        $rt = $stat['request_count'] > 0 ? $stat['request_time'] / $stat['request_count'] / 1000 : 0;
+        $text = sprintf("   <%s> STATS --- %s --- (%5.1fms)  ", $this->_prefix, date("Y-m-d H:i:s"), $rt);
+        $this->_print_title($text);
+    }
+
+    public function enter() {
+        if(isset($this->_last_sorted_stat[$this->_position])) {
+            $opts = $this->_opts;
+            $opts['prefix'] = $this->_last_sorted_stat[$this->_position]['key'];
+            $instance = YY_Prof_Stat_Func::get_instance($opts, $this);
+            $this->register_delay_callback(function()use($instance, $opts) {
+                $instance->run($opts); 
+            });
+            return RET_BREAK;
+        }
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function run() {
+        $this->_first_stat = $this->_last_stat = $this->get_stat();
+        $this->_first_page_stat = $this->_last_page_stat = $this->get_page_stat();
+
+        $this->register_callbacks();
+
+        $this->loop();
+    }
+
+    public function resume($opts) {
+        $this->_start_time = time(); 
+        $this->_prefix = isset($opts['prefix']) ? $opts['prefix'] : '';
+        return $this;
+    }
+}
+
+class YY_Prof_Stat_Func extends YY_Prof_Stat {
+    protected static $_fields = array(
+        "type", "count", "time",
+    );
+
+    protected static $_showFields = array(
+        //array("name" => "key", "title" => "KEY", "format" => "%-70s", "data_format" => "%-70s"),
+        array("name" => "qps", "title" => "QPS",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+        array("name" => "rt",  "title" => "RT(ms)", "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "reqb","title" => "Req(B)", "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "resb","title" => "Res(B)", "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "200", "title" => "200",    "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+        array("name" => "404", "title" => "404",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+        array("name" => "500", "title" => "500",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+        array("name" => "502", "title" => "502",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+        array("name" => "503", "title" => "503",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+    );
+    protected static $_showExtraFields = array();
+
+    protected $_sort_field = 'rt';
+    protected $_sort_field_index = 1;
+
+    public function get_simple_stat() {
+        $stat = yy_prof_get_func_stat($this->_prefix);
+        return $stat ? array($stat) : array();
+    }
+
+    public function get_simple_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_simple_stat(); 
+        $run_time = (time() - $this->_start_time) ?: 1;
+
+        $delta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['count'];
+            $t = array(
+                'key' => date("H:i:s"),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
+                'reqb' => $count > 0 && isset($val['request_bytes']) ? $val['request_bytes'] / $count : 0,
+                'resb' => $count > 0 && isset($val['response_bytes']) ? $val['response_bytes'] / $count : 0,
+                '200' => $count > 0 && isset($val['status_200']) ? $val['status_200'] / $count : 0,
+                '300' => $count > 0 && isset($val['status_300']) ? $val['status_300'] / $count : 0,
+                '400' => $count > 0 && isset($val['status_400']) ? $val['status_400'] / $count : 0,
+                '500' => $count > 0 && isset($val['status_500']) ? $val['status_500'] / $count : 0,
+                '501' => $count > 0 && isset($val['status_501']) ? $val['status_501'] / $count : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        return $result;
+    
+    }
+
+    public function get_stat() {
+        return yy_prof_get_all_func_stat($this->_prefix);
+    }
+
+    public function get_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_stat(); 
+        $run_time = (time() - $this->_start_time) ?: 1;
+
+        $delta = array();
+        $pageDelta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['count'];
+            $t = array(
+                'key' => substr($key, 0, $this->_key_len),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
+                'reqb' => $count > 0 && isset($val['request_bytes']) ? $val['request_bytes'] / $count : 0,
+                'resb' => $count > 0 && isset($val['response_bytes']) ? $val['response_bytes'] / $count : 0,
+                '200' => $count > 0 && isset($val['status_200']) ? $val['status_200'] / $count : 0,
+                '404' => $count > 0 && isset($val['status_404']) ? $val['status_404'] / $count : 0,
+                '500' => $count > 0 && isset($val['status_500']) ? $val['status_500'] / $count : 0,
+                '502' => $count > 0 && isset($val['status_502']) ? $val['status_502'] / $count : 0,
+                '503' => $count > 0 && isset($val['status_503']) ? $val['status_503'] / $count : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        return $result;
+    }
+
+    public function print_help() {
+    
+    }
+
+    public function print_title() {
+        $str = $this->_prefix ?: "FUNCS";
+        $text = "   <{$str}> STATS --- " . date("Y-m-d H:i:s") . '   ';
+        $this->_print_title($text);
+    }
+
+    public function enter() {
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function resume($opts) {
+        $this->_start_time = time(); 
+        $this->_prefix = isset($opts["prefix"]) ? $opts['prefix'] : '';
+        return $this;
+    }
+
+    public function run() {
+        $this->debug();
+
+        $this->_first_stat = $this->_last_stat = $this->get_stat();
+
+        $this->register_callbacks();
+
+        $this->loop();
+    }
+
+    public function run2() {
+        $this->_first_stat = $this->_last_stat = $this->get_simple_stat();
+
+        $this->loop2(); 
+    }
+
+    public function run3(){
+        $list = yy_prof_get_func_list($this->_prefix); 
+        foreach($list as $row) {
+            echo $row, "\n";
+        }
+    }
+}
+
+class YY_Prof_Stat_Func_Deps extends YY_Prof_Stat {
+    protected static $_fields = array(
+        "type", "count", "time",
+    );
+
+    protected static $_showFields = array(
+        //array("name" => "key", "title" => "KEY", "format" => "%-70s", "data_format" => "%-70s"),
+        array("name" => "qps", "title" => "QPS",    "len" => 8,  "format" => "%8s", "data_format" => "%8.1f"),
+        array("name" => "rt",  "title" => "RT(ms)", "len" => 10, "format" => "%10s", "data_format" => "%10.1f"),
+    );
+    protected static $_showExtraFields = array();
+
+    protected $_sort_field = 'rt';
+    protected $_sort_field_index = 1;
+
+    protected $_last_func_stat = array();
+    protected $_first_func_stat = array();
+
+    public function get_func_stat() {
+        $ret = yy_prof_get_func_stat($this->_prefix); 
+        return $ret ? array($ret) : array();
+    }
+
+    public function get_func_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_func_stat(); 
+        $run_time = (time() - $this->_start_time) ?: 1;
+
+        $delta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_func_stat, $stat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_func_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['count'];
+            $t = array(
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_func_stat = $stat;
+        return $result;
+    }
+
+    public function get_stat() {
+        $ret = array();
+        $func = $this->_prefix;
+        $list = yy_prof_get_page_list();
+        foreach($list as $val) {
+            $pageStatList = yy_prof_get_page_func_stat($val);
+            if($pageStatList && isset($pageStatList[$func])) {
+                $ret[$val] = $pageStatList[$func];
+            }
+        }
+        return $ret;
+    }
+
+    public function get_show_stat() {
+        $interval = $this->_interval;
+        $stat = $this->get_stat(); 
+        $run_time = (time() - $this->_start_time) ?: 1;
+
+        $delta = array();
+        $pageDelta = array();
+        switch($this->_mode) {
+            case self::MODE_FROM_START:
+                $delta = $this->_get_delta_stat($this->_first_stat, $stat);
+                $interval = $run_time;
+                break;
+                
+            case self::MODE_FROM_INSTALL:
+                $delta = $stat;
+                $interval = 1;
+                break;
+
+            case self::MODE_DEFAULT:
+            default:
+                $delta = $this->_get_delta_stat($this->_last_stat, $stat);
+                break;
+        }
+        $result = array();
+        foreach($delta as $key => $val) {
+            $count = $val['count'];
+            $t = array(
+                'key' => substr($key, 0, $this->_key_len),
+                'qps' => $count / $interval,
+                'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
+            );
+            $result[] = $t;
+        }
+        $this->_last_stat = $stat;
+        return $result;
+    }
+
+    public function print_help() {
+    
+    }
+
+    public function print_title() {
+        $qps_rt_str = '';
+        $stat = $this->get_func_show_stat();
+        if($stat) {
+            $stat = $stat[0];
+            $qps_rt_str = sprintf("  QPS: %10.1f RT: %5.1fms  ", $stat['qps'], $stat['rt']);
+        }
+        $str = $this->_prefix ?: "FUNCS";
+        $text = "   <{$str}> STATS --- " . date("Y-m-d H:i:s") . ' ---' . $qps_rt_str;
+        $this->_print_title($text);
+    }
+
+    public function enter() {
+        return RET_CONTINUE_WAITING;
+    }
+
+    public function resume($opts) {
+        $this->_start_time = time(); 
+        $this->_prefix = isset($opts["prefix"]) ? $opts['prefix'] : '';
+        return $this;
+    }
+
+    public function run() {
+        $this->debug();
+
+        $this->_first_stat = $this->_last_stat = $this->get_stat();
+        $this->_first_func_stat = $this->_last_func_stat = $this->get_func_stat();
+
+        $this->register_callbacks();
+
+        $this->loop();
+    }
+}
+
+function usage() {
+    global $argv;
+    echo "{$argv[0]} --help --prefix=<prefix> --mode=<mode> --func --page --simple --clear --deps\n";
+    exit;
+}
+$options = array(
+    'prefix::',
+    'mode::',
+    'interval::',
+    'func',
+    'page',
+    'simple',
+    'help',
+    'list',
+    'clear',
+    'deps',
+);
+
+$opts = getopt("hi:m:p:sufld", $options);
+
+$opts['interval'] = isset($opts['interval']) ? intval($opts['interval']) : (isset($opts['i']) ? intval($opts['i']) : 5);
+$opts['prefix'] = isset($opts['prefix']) ? $opts['prefix'] : (isset($opts['p']) ? $opts['p'] : '');
+$opts['mode'] = isset($opts['mode']) ? $opts['mode'] : (isset($opts['m']) ? intval($opts['m']) : 2);
+$opts['func'] = isset($opts['func']) || isset($opts['f']);
+$opts['page'] = isset($opts['page']) || isset($opts['u']) || 1;
+$opts['simple'] = isset($opts['simple']) || isset($opts['s']);
+$opts['list'] = isset($opts['list']) || isset($opts['l']);
+$opts['clear'] = isset($opts['clear']) || isset($opts['c']);
+$opts['deps'] = isset($opts['deps']) || isset($opts['d']);
+
+try {
+    if(isset($opts['help']) || isset($opts['h'])) {
+        usage();
+    } else if($opts['clear']) {
+        yy_prof_clear_stats();
+        echo "Stats clear done!\n";
+    } else if($opts['list'] && $opts['func']) {
+        $opts['simple'] = 1;
+        $page = YY_Prof_Stat_Func::get_instance($opts, null);
+        $page->run3();
+    } else if($opts['list'] && $opts['page']) {
+        $opts['simple'] = 1;
+        $page = YY_Prof_Stat_Page::get_instance($opts, null);
+        $page->run3();
+    } else if($opts['simple'] && $opts['func'] && $opts['prefix']) {
+        $page = YY_Prof_Stat_Func::get_instance($opts, null);
+        $page->run2();
+    } else if($opts['simple'] && $opts['page'] && $opts['prefix']) {
+        $page = YY_Prof_Stat_Page::get_instance($opts, null);
+        $page->run2();
+    } else if($opts['func'] && $opts['deps'] && $opts['prefix']) {
+        $opts['simple'] = 0;
+        $page = YY_Prof_Stat_Func_Deps::get_instance($opts, null);
+        $page->run();
+    } else if($opts['func']) {
+        $opts['simple'] = 0;
+        $page = YY_Prof_Stat_Func::get_instance($opts, null);
+        $page->run();
+    } else {
+        $opts['simple'] = 0;
+        $page = YY_Prof_Stat_Page::get_instance($opts, null);
+        $page->run();
+    }
+} catch (Exception $e) {
+    error_log($e);
+}
