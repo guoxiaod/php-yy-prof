@@ -80,7 +80,7 @@ if test "$PHP_YY_PROF" != "no"; then
   eval "LOCALSTATEDIR=$localstatedir"
   AC_DEFINE_UNQUOTED([LOCALSTATEDIR], ["${LOCALSTATEDIR}"], [define local state dir])
 
-  CFLAGS="$CFLAGS -lcurl -lleveldb -lmdbm -Wall -D_GNU_SOURCE"
+  CFLAGS="$CFLAGS -lcurl -lleveldb -lmdbm -Wall -D_GNU_SOURCE -DTIME_USE_CLOCK=1"
 
   YY_PROF_SOURCE_FILES="yy_time.c yy_log.c yy_api.c yy_stat.c yy_storage.c"
   YY_PROF_SOURCE_FILES="${YY_PROF_SOURCE_FILES} storage/mdbm.c storage/leveldb.c"

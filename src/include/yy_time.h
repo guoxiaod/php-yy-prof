@@ -11,14 +11,24 @@
  * @return 64 bit unsigned integer
  * @author cjiang
  */
-#define SET_TIMESTAMP_COUNTER(tc) \
-    do { \
-        uint32_t __a,__d; \
-        uint64_t val; \
-        asm volatile("rdtsc" : "=a" (__a), "=d" (__d)); \
-        (val) = ((uint64_t)__a) | (((uint64_t)__d)<<32); \
-        tc = val; \
-    } while (0)
+#ifdef TIME_USE_CLOCK
+    #define SET_TIMESTAMP_COUNTER(tc) \
+        do { \
+            struct timespec t = {0, 0}; \
+            if (clock_gettime(CLOCK_MONOTONIC, &t) == 0) { \
+                (tc) = t.tv_sec * 1e6 + t.tv_nsec / 1000; \
+            } \
+        } while (0);
+#else
+    #define SET_TIMESTAMP_COUNTER(tc) \
+        do { \
+            uint32_t __a,__d; \
+            uint64_t val; \
+            asm volatile("rdtsc" : "=a" (__a), "=d" (__d)); \
+            (val) = ((uint64_t)__a) | (((uint64_t)__d)<<32); \
+            tc = val; \
+        } while (0)
+#endif
 
 #define GET_US_FROM_TSC(count, cpu_frequencies) ((count) / (cpu_frequencies))
 #define GET_TSC_FROM_US(usec, cpu_frequencies) ((uint64_t) ((usecs) * (cpu_frequencies)))

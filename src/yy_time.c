@@ -15,9 +15,9 @@
     php_error((log_level), "YY_PROF: %s %d:%s in %s:%d", \
         (str), errno, strerror(errno), __FILE__, __LINE__)
 
-double get_cpu_frequency();
-int get_all_cpu_frequencies(yy_prof_cpu_t * cpu);
-int bind_to_cpu(yy_prof_cpu_t * cpu, uint32_t cpu_id);
+static double get_cpu_frequency();
+static int get_all_cpu_frequencies(yy_prof_cpu_t * cpu);
+static int bind_to_cpu(yy_prof_cpu_t * cpu, uint32_t cpu_id);
 
 
 // MODULE INIT
@@ -58,7 +58,11 @@ int bind_rand_cpu(yy_prof_cpu_t * cpu) {
     if(cpu->cpu_frequencies == NULL) {
         get_all_cpu_frequencies(cpu);
     }
+#ifdef TIME_USE_CLOCK
+    uint32_t id = 0;
+#else
     uint32_t id = rand() % cpu->av_cpu_num;
+#endif
     bind_to_cpu(cpu, cpu->av_cpus[id]);
     return 0;
 }
@@ -78,7 +82,7 @@ int release_cpu(yy_prof_cpu_t * cpu) {
         YY_PROF_TIME_LOG(E_WARNING, "restore setaffinity failed");
         return -1;
     }
-    /* default value ofor cur_cpu_id is 0. */
+    /* default value for cur_cpu_id is 0. */
     cpu->cur_cpu_id = 0;
 
     return 0;
@@ -92,10 +96,13 @@ int release_cpu(yy_prof_cpu_t * cpu) {
  * @return double.
  * @author cjiang
  */
-double get_cpu_frequency() {
+static double get_cpu_frequency() {
     struct timeval start;
     struct timeval end;
 
+#ifdef TIME_USE_CLOCK
+    return 1.0;
+#else
     if (gettimeofday(&start, 0)) {
         YY_PROF_TIME_LOG(E_ERROR, "gettimeofday failed in get_cpu_frequency");
         return 0.0;
@@ -112,6 +119,7 @@ double get_cpu_frequency() {
     uint64_t tsc_end;
     SET_TIMESTAMP_COUNTER(tsc_end);
     return (tsc_end - tsc_start) * 1.0 / (GET_US_INTERVAL(&start, &end));
+#endif
 }
 
 /**
@@ -119,7 +127,7 @@ double get_cpu_frequency() {
  *
  * @author cjiang
  */
-int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
+static int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
     int fd, valid;
     mode_t mode;
     uint32_t version;
@@ -136,6 +144,7 @@ int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
         return -1;
     }
 
+#ifndef TIME_USE_CLOCK
     errno = 0;
     fd = open(YY_PROF_CPU_INFO_FILE, O_RDONLY);
     if(fd > 0) {
@@ -172,6 +181,7 @@ int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
         }
     }
     close(fd);
+#endif
 
     /* Iterate over all cpus found on the machine. */
     for (id = 0; id < cpu->cpu_num; ++ id) {
@@ -198,6 +208,7 @@ int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
     }
     release_cpu(cpu);
 
+#ifndef TIME_USE_CLOCK
     errno = 0;
     mode = umask(0111);
     fd = open(YY_PROF_CPU_INFO_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -219,6 +230,7 @@ int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
         return -1;
     }
     close(fd);
+#endif
 
     return 0;
 }
@@ -234,7 +246,10 @@ int get_all_cpu_frequencies(yy_prof_cpu_t * cpu) {
  *
  * @author cjiang
  */
-int bind_to_cpu(yy_prof_cpu_t * cpu, uint32_t cpu_id) {
+static int bind_to_cpu(yy_prof_cpu_t * cpu, uint32_t cpu_id) {
+#ifdef TIME_USE_CLOCK
+    return 0;
+#else
     cpu_set_t new_mask;
 
     CPU_ZERO(&new_mask);
@@ -249,4 +264,5 @@ int bind_to_cpu(yy_prof_cpu_t * cpu, uint32_t cpu_id) {
     cpu->cur_cpu_id = cpu_id;
 
     return 0;
+#endif
 }

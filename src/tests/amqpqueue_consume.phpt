@@ -67,12 +67,15 @@ function test_consume($envelope, $queue) {
 $q->consume("test_consume");
 
 $r = yy_prof_get_all_func_stat();
+ksort($r);
 var_export($r); echo "\n";
 
 $r = yy_prof_get_all_page_stat();
+ksort($r);
 var_export($r); echo "\n";
 
 $r = yy_prof_get_page_func_stat("AMQPQueue::consume::test_user");
+ksort($r);
 var_export($r); echo "\n";
 
 ?>
@@ -81,6 +84,19 @@ var_export($r); echo "\n";
 'test_user'
 'test_user'
 array (
+  'AMQPConnection::connect' => 
+  array (
+    'type' => 3,
+    'count' => 1,
+    'time' => %d,
+    'request_bytes' => 0,
+    'response_bytes' => 0,
+    'status_200' => 1,
+    'status_300' => 0,
+    'status_400' => 0,
+    'status_500' => 0,
+    'status_501' => 0,
+  ),
   'AMQPExchange::publish' => 
   array (
     'type' => 3,
@@ -107,38 +123,8 @@ array (
     'status_500' => 0,
     'status_501' => 0,
   ),
-  'AMQPConnection::connect' => 
-  array (
-    'type' => 3,
-    'count' => 1,
-    'time' => %d,
-    'request_bytes' => 0,
-    'response_bytes' => 0,
-    'status_200' => 1,
-    'status_300' => 0,
-    'status_400' => 0,
-    'status_500' => 0,
-    'status_501' => 0,
-  ),
 )
 array (
-  'AMQPQueue::consume::test_user' => 
-  array (
-    'request_time' => %d,
-    'request_count' => 3,
-    'url_count' => 0,
-    'url_time' => 0,
-    'sql_count' => 0,
-    'sql_time' => 0,
-    'queue_count' => 0,
-    'queue_time' => 0,
-    'cache_count' => 0,
-    'cache_time' => 0,
-    'mongodb_count' => 0,
-    'mongodb_time' => 0,
-    'default_count' => 0,
-    'default_time' => %d,
-  ),
   '%s/tests/amqpqueue_consume.php' => 
   array (
     'request_time' => %d,
@@ -155,6 +141,23 @@ array (
     'mongodb_time' => 0,
     'default_count' => 0,
     'default_time' => 0,
+  ),
+  'AMQPQueue::consume::test_user' => 
+  array (
+    'request_time' => %d,
+    'request_count' => 3,
+    'url_count' => 0,
+    'url_time' => 0,
+    'sql_count' => 0,
+    'sql_time' => 0,
+    'queue_count' => 0,
+    'queue_time' => 0,
+    'cache_count' => 0,
+    'cache_time' => 0,
+    'mongodb_count' => 0,
+    'mongodb_time' => 0,
+    'default_count' => 0,
+    'default_time' => %d,
   ),
 )
 array (

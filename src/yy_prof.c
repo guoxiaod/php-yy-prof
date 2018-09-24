@@ -161,7 +161,7 @@ PHP_INI_BEGIN()
         OnUpdateBool, enable_trace_cli, zend_yy_prof_globals, yy_prof_globals)
     STD_PHP_INI_ENTRY("yy_prof.enable_request_detector", "0", PHP_INI_ALL,
         OnUpdateBool, enable_request_detector, zend_yy_prof_globals, yy_prof_globals)
-    STD_PHP_INI_ENTRY("yy_prof.slow_run_time", "1000", PHP_INI_ALL,
+    STD_PHP_INI_ENTRY("yy_prof.slow_run_time", "1000000", PHP_INI_ALL,
         OnUpdateTime, slow_run_time, zend_yy_prof_globals, yy_prof_globals)
     STD_PHP_INI_ENTRY("yy_prof.protect_load", "3", PHP_INI_ALL,
         OnUpdateReal, protect_load, zend_yy_prof_globals, yy_prof_globals)
