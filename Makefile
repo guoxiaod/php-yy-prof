@@ -21,5 +21,4 @@ build:
 	
 copy:
 	cp ${RPMBUILD_ROOT}/RPMS/${ARCH}/*${NAME}*${VERSION}*.rpm .
-	cp ${RPMBUILD_ROOT}/RPMS/noarch/*${NAME}*${VERSION}*.rpm .
 

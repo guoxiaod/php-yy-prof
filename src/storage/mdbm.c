@@ -56,7 +56,7 @@ void yy_prof_storage_mdbm_set(
     datum key_ = {key, klen}, val_ = {val, vlen};
     errno = 0;
     *errptr = NULL;
-    if (mdbm_store_r(db, &key_, &val_, MDBM_INSERT, NULL)) {
+    if (mdbm_store_r(db, &key_, &val_, MDBM_REPLACE, NULL)) {
         char buffer[200];
         snprintf(buffer, sizeof(buffer), "store %s fail: errno=%d errstr=%s", key, errno, strerror(errno));
         *errptr = strndup(buffer, strlen(buffer));
