@@ -109,6 +109,23 @@ yy_prof__curl_2(yy_prof_entry_t * entry) {
     yy_prof__curl_ex(entry, 2);
 }
 
+static void 
+yy_prof__file_get_contents(yy_prof_entry_t * entry) {
+    zval *z;
+    YY_PROF_EXTRACT_ARGS();
+
+    entry->type = IO_TYPE_URL;
+
+    if (argc == 0) {
+        return ;
+    }
+    
+    z = args;
+    if (strncmp(Z_STRVAL_P(z), "http://", sizeof("http://") - 1) == 0
+        || strncmp(Z_STRVAL_P(z), "https://", sizeof("http://") - 1) == 0) {
+        entry->key = yy_prof__url_simplify_key(Z_STRVAL_P(z), Z_STRLEN_P(z));   
+    }
+}
 
 static void
 yy_prof__yar(yy_prof_entry_t * entry) {
@@ -824,6 +841,8 @@ yy_prof_adapter_define_list[] =
 
     {"curl_exec"                       , ADAPTER_TYPE_EQUALS, 4, yy_prof__curl},
     {"curl_multi_remove_handle"        , ADAPTER_TYPE_EQUALS, 4, yy_prof__curl_2},
+
+    {"file_get_contents"               , ADAPTER_TYPE_EQUALS, 4, yy_prof__file_get_contents},
                                                             
     //{"http\\Client::send"              }, ADAPTER_TYPE_EQUALS, 0, yy_prof__http},
     {"http\\Client::getResponse"       , ADAPTER_TYPE_EQUALS, 4, yy_prof__http},
