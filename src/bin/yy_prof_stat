@@ -336,7 +336,7 @@ abstract class YY_Prof_Stat {
         $idx  = $this->_list_min_lineno;
         $prefixLen = strlen($this->_prefix);
         for($i = $from; $i < $this->_count; $i++) {
-            $data = $datas[$i]; 
+            $data = $datas[$i]['data'];
             if(isset($data['key'])) {
                 $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
             }
@@ -356,7 +356,7 @@ abstract class YY_Prof_Stat {
         $prefixLen = strlen($this->_prefix);
         $this->_display->set_lineno($lineno);
         if(isset($this->_last_sorted_stat[$this->_position])){
-            $data = $this->_last_sorted_stat[$this->_position];
+            $data = $this->_last_sorted_stat[$this->_position]['data'];
             if(isset($data['key'])) {
                 $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
             }
@@ -370,7 +370,7 @@ abstract class YY_Prof_Stat {
         if(isset($this->_last_sorted_stat[$last_position])) {
             list($last_from, $last_lineno, $last_page) = $this->_compute_output_parameters($last_position);
             if($page == $last_page) {
-                $data = $this->_last_sorted_stat[$last_position];
+                $data = $this->_last_sorted_stat[$last_position]['data'];
                 if(isset($data['key'])) {
                     $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
                 }
@@ -430,7 +430,7 @@ abstract class YY_Prof_Stat {
     protected function _sort($datas) {
         $sortField = $this->_sort_field;
         usort($datas, function($a, $b) use($sortField) {
-            return $a[$sortField] < $b[$sortField] ? 1 : -1;
+            return $a['data'][$sortField] < $b['data'][$sortField] ? 1 : -1;
         }); 
         return $datas;
     }
@@ -831,7 +831,7 @@ class YY_Prof_Stat_Page extends YY_Prof_Stat {
                 'sql' => $count > 0 ? $val['sql_count'] / $count : 0,
                 'sqlrt' => $val['sql_count'] > 0 ? $val['sql_time'] / $val['sql_count'] / 1000 : 0,
             );
-            $result[] = $t;
+            $result[] = ['data' => $t, 'key' => $key];
         }
         $this->_last_stat = $stat;
         return $result;
@@ -957,7 +957,7 @@ class YY_Prof_Stat_Page_Func extends YY_Prof_Stat {
                 'rrt' => $deltaCount > 0 ? $val['time'] / $deltaCount / 1000 : 0,
                 'pct' => $deltaTime > 0 ? 100 * $val['time'] / $deltaTime : 0,
             );
-            $result[] = $t;
+            $result[] = ['data' => $t, 'key' => $key];
         }
         $this->_last_stat = $stat;
         $this->_last_page_stat = $pageStat;
@@ -1118,7 +1118,7 @@ class YY_Prof_Stat_Func extends YY_Prof_Stat {
                 '502' => $count > 0 && isset($val['status_502']) ? $val['status_502'] / $count : 0,
                 '503' => $count > 0 && isset($val['status_503']) ? $val['status_503'] / $count : 0,
             );
-            $result[] = $t;
+            $result[] = ['data' => $t, 'key' => $key];
         }
         $this->_last_stat = $stat;
         return $result;
@@ -1270,7 +1270,7 @@ class YY_Prof_Stat_Func_Deps extends YY_Prof_Stat {
                 'qps' => $count / $interval,
                 'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
             );
-            $result[] = $t;
+            $result[] = ['data' => $t, 'key' => $key];
         }
         $this->_last_stat = $stat;
         return $result;
