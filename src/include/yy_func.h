@@ -126,7 +126,7 @@ yy_prof_get_func_name(zend_execute_data * execute_data TSRMLS_DC) {
     }
 
     if(function_name) {
-        if (object) {
+        if (object && object->ce) {
             if (func->common.scope) {
                 class_name = ZSTR_VAL(func->common.scope->name);
             } else {
