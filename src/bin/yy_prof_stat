@@ -338,7 +338,7 @@ abstract class YY_Prof_Stat {
         for($i = $from; $i < $this->_count; $i++) {
             $data = $datas[$i]['data'];
             if(isset($data['key'])) {
-                $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+                $data['key'] = $this->_get_display_key($data['key'], $prefixLen, $this->_key_len);
             }
             array_unshift($data, $this->_list_data_format); 
 
@@ -358,7 +358,7 @@ abstract class YY_Prof_Stat {
         if(isset($this->_last_sorted_stat[$this->_position])){
             $data = $this->_last_sorted_stat[$this->_position]['data'];
             if(isset($data['key'])) {
-                $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+                $data['key'] = $this->_get_display_key($data['key'], $prefixLen, $this->_key_len);
             }
             array_unshift($data, $this->_list_data_format); 
 
@@ -372,7 +372,7 @@ abstract class YY_Prof_Stat {
             if($page == $last_page) {
                 $data = $this->_last_sorted_stat[$last_position]['data'];
                 if(isset($data['key'])) {
-                    $data['key'] = $this->_get_display_key($data['key'], $prefixLen);
+                    $data['key'] = $this->_get_display_key($data['key'], $prefixLen, $this->_key_len);
                 }
                 array_unshift($data, $this->_list_data_format); 
 
@@ -384,7 +384,7 @@ abstract class YY_Prof_Stat {
         $this->_display->refresh();
     }
 
-    protected function _get_display_key($key, $len) {
+    protected function _get_display_key($key, $start, $len) {
         return $key;
     }
 
@@ -691,7 +691,7 @@ CONTINUE_SLEEP:
 
     abstract public function get_stat();
 
-    abstract public function get_show_stat();
+    abstract public function get_show_stat($prefix);
 
     abstract public function print_title();
 
@@ -733,8 +733,8 @@ class YY_Prof_Stat_Page extends YY_Prof_Stat {
     protected $_sort_field = 'rt';
     protected $_sort_field_index = 1;
 
-    protected function _get_display_key($key, $len) {
-        return substr($key, $len);
+    protected function _get_display_key($key, $start, $len) {
+        return substr($key, $start, $len);
     }
 
     public function get_simple_stat() {
@@ -795,7 +795,7 @@ class YY_Prof_Stat_Page extends YY_Prof_Stat {
         return $ret;
     }
 
-    public function get_show_stat() {
+    public function get_show_stat($prefix) {
         $interval = $this->_interval;
         $stat = $this->get_stat(); 
         $run_time = (time() - $this->_start_time) ?: 1;
@@ -822,7 +822,7 @@ class YY_Prof_Stat_Page extends YY_Prof_Stat {
             $time2 = $val['url_time'] + $val['sql_time'] + $val['queue_time'] 
                     + $val['cache_time'] + $val['mongodb_time'];
             $t = array(
-                'key' => substr($key, 0, $this->_key_len),
+                'key' => $key,
                 'qps' => $count / $interval,
                 'rt' => $count > 0 ? $val['request_time'] / $count / 1000 : 0,
                 'rt2' => $count > 0 ? $time2 / $count / 1000 : 0,
@@ -917,7 +917,7 @@ class YY_Prof_Stat_Page_Func extends YY_Prof_Stat {
         return yy_prof_get_page_stat($this->_prefix);
     }
 
-    public function get_show_stat() {
+    public function get_show_stat($prefix) {
         $interval = $this->_interval;
         $stat = $this->get_stat(); 
         $pageStat = $this->get_page_stat();
@@ -950,7 +950,7 @@ class YY_Prof_Stat_Page_Func extends YY_Prof_Stat {
         foreach($delta as $key => $val) {
             $count = $val['count'];
             $t = array(
-                'key' => substr($key, 0, $this->_key_len),
+                'key' => $key,
                 'qps' => $count / $interval,
                 'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
                 'qpr' => $deltaCount > 0 ? $count / $deltaCount : 0,
@@ -1080,7 +1080,7 @@ class YY_Prof_Stat_Func extends YY_Prof_Stat {
         return yy_prof_get_all_func_stat($this->_prefix);
     }
 
-    public function get_show_stat() {
+    public function get_show_stat($prefix) {
         $interval = $this->_interval;
         $stat = $this->get_stat(); 
         $run_time = (time() - $this->_start_time) ?: 1;
@@ -1107,7 +1107,7 @@ class YY_Prof_Stat_Func extends YY_Prof_Stat {
         foreach($delta as $key => $val) {
             $count = $val['count'];
             $t = array(
-                'key' => substr($key, 0, $this->_key_len),
+                'key' => $key,
                 'qps' => $count / $interval,
                 'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
                 'reqb' => $count > 0 && isset($val['request_bytes']) ? $val['request_bytes'] / $count : 0,
@@ -1239,7 +1239,7 @@ class YY_Prof_Stat_Func_Deps extends YY_Prof_Stat {
         return $ret;
     }
 
-    public function get_show_stat() {
+    public function get_show_stat($prefix) {
         $interval = $this->_interval;
         $stat = $this->get_stat(); 
         $run_time = (time() - $this->_start_time) ?: 1;
@@ -1266,7 +1266,7 @@ class YY_Prof_Stat_Func_Deps extends YY_Prof_Stat {
         foreach($delta as $key => $val) {
             $count = $val['count'];
             $t = array(
-                'key' => substr($key, 0, $this->_key_len),
+                'key' => $key,
                 'qps' => $count / $interval,
                 'rt' => $count > 0 ? $val['time'] / $count / 1000 : 0,
             );

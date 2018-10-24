@@ -7,7 +7,7 @@
 
 Summary: Package for yy-prof
 Name: %{?scl_prefix}%{peclname}
-Version: 0.1.2
+Version: 0.1.3
 Release: 1
 License: PHP
 Group: Development/Languages
