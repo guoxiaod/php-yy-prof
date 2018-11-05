@@ -60,7 +60,8 @@ extension=yy_prof.so
 ; set if auto start tracking the function call
 yy_prof.auto_enable = 0
 ; slow run function will log into %{_localstatedir}/log/yy_prof/slow.log
-yy_prof.slow_run_time = 500000
+; yy_prof.slow_run_time unit is ms
+yy_prof.slow_run_time = 500
 ; enable trace functions
 yy_prof.enable_trace = 1
 ; enable trace functions in cli mode
