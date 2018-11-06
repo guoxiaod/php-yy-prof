@@ -22,3 +22,6 @@ build:
 copy:
 	cp ${RPMBUILD_ROOT}/RPMS/${ARCH}/*${NAME}*${VERSION}*.rpm .
 
+
+clean:
+	rm -rf *.rpm *.tgz
