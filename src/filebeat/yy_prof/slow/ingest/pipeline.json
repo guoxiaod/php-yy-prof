@@ -4,8 +4,9 @@
     "grok": {
       "field": "message",
       "patterns": [
-        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\s+URI: %{DATA:yy_prof.slow.uri}\\s+KEY: %{DATA:yy_prof.slow.key}\\s+URL: %{DATA:yy_prof.slow.key_url}\\s+DETAIL: code=%{NUMBER:yy_prof.slow.code} n=%{NUMBER:yy_prof.slow.nslookup} c=%{NUMBER:yy_prof.slow.connect} a=%{NUMBER:yy_prof.slow.appconnect} p=%{NUMBER:yy_prof.slow.pretransfer} s=%{NUMBER:yy_prof.slow.starttransfer} r=%{NUMBER:yy_prof.slow.redirect} t=%{NUMBER:yy_prof.slow.total}\\s+%{GREEDYMULTILINE:yy_prof.slow.message}",
-        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\s+URI: %{DATA:yy_prof.slow.uri}\\s+KEY: %{DATA:yy_prof.slow.key}\\s+%{GREEDYMULTILINE:yy_prof.slow.message}"
+        "============SLOW RUN CODE===========\\nTIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\nURI: %{DATA:yy_prof.slow.uri}\\nKEY: %{DATA:yy_prof.slow.key}\\nURL: %{DATA:yy_prof.slow.key_url}\\nDETAIL: code=%{NUMBER:yy_prof.slow.code} n=%{NUMBER:yy_prof.slow.nslookup} c=%{NUMBER:yy_prof.slow.connect} a=%{NUMBER:yy_prof.slow.appconnect} p=%{NUMBER:yy_prof.slow.pretransfer} s=%{NUMBER:yy_prof.slow.starttransfer} r=%{NUMBER:yy_prof.slow.redirect} t=%{NUMBER:yy_prof.slow.total}\\n(?=0\\))%{GREEDYMULTILINE:yy_prof.slow.message}",
+        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\nURI: %{DATA:yy_prof.slow.uri}\\nKEY: %{DATA:yy_prof.slow.key}\\nSQL: %{GREEDYMULTILINE:yy_prof.slow.sql}\\n(?=0\\))%{GREEDYMULTILINE:yy_prof.slow.message}",
+        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\nURI: %{DATA:yy_prof.slow.uri}\\nKEY: %{DATA:yy_prof.slow.key}\\n(?=0\\))%{GREEDYMULTILINE:yy_prof.slow.message}"
       ],
       "pattern_definitions" : {
           "GREEDYMULTILINE" : "(.|\n)*"
@@ -20,6 +21,11 @@
     "rename": {
       "field": "@timestamp",
       "target_field": "read_timestamp"
+    }
+  }, {
+    "rename": {
+      "field": "yy_prof.slow.message",
+      "target_field": "message"
     }
   }, {
     "date": {
