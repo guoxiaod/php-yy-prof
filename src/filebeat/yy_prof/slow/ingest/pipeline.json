@@ -1,0 +1,42 @@
+{
+  "description": "Pipeline for parsing the yy_prof slow logs",
+  "processors": [{
+    "grok": {
+      "field": "message",
+      "patterns": [
+        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\s+URI: %{DATA:yy_prof.slow.uri}\\s+KEY: %{DATA:yy_prof.slow.key}\\s+URL: %{DATA:yy_prof.slow.key_url}\\s+DETAIL: code=%{NUMBER:yy_prof.slow.code} n=%{NUMBER:yy_prof.slow.nslookup} c=%{NUMBER:yy_prof.slow.connect} a=%{NUMBER:yy_prof.slow.appconnect} p=%{NUMBER:yy_prof.slow.pretransfer} s=%{NUMBER:yy_prof.slow.starttransfer} r=%{NUMBER:yy_prof.slow.redirect} t=%{NUMBER:yy_prof.slow.total}\\s+%{GREEDYMULTILINE:yy_prof.slow.message}",
+        "============SLOW RUN CODE===========\\s+TIME: \\[%{DATA:yy_prof.slow.timestamp}\\] FUNC: <%{DATA:yy_prof.slow.func}> SPENT: %{NUMBER:yy_prof.slow.time}ms UUID: %{DATA:yy_prof.slow.uuid}?\\s+URI: %{DATA:yy_prof.slow.uri}\\s+KEY: %{DATA:yy_prof.slow.key}\\s+%{GREEDYMULTILINE:yy_prof.slow.message}"
+      ],
+      "pattern_definitions" : {
+          "GREEDYMULTILINE" : "(.|\n)*"
+      },
+      "ignore_missing": true
+    }
+  },{
+    "remove":{
+      "field": "message"
+    }
+  }, {
+    "rename": {
+      "field": "@timestamp",
+      "target_field": "read_timestamp"
+    }
+  }, {
+    "date": {
+      "field": "yy_prof.slow.timestamp",
+      "target_field": "@timestamp",
+      "formats": ["YYYY-MM-dd H:m:s Z"],
+      "timezone": "Asia/Shanghai"
+    }
+  }, {
+    "remove": {
+      "field": "yy_prof.slow.timestamp"
+    }
+  }],
+  "on_failure" : [{
+    "set" : {
+      "field" : "error.message",
+      "value" : "{{ _ingest.on_failure_message }}"
+    }
+  }]
+}
